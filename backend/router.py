@@ -7,6 +7,11 @@ Onboarding steps:
   2  → language saved          → ask crop
   3  → crop saved              → ask district
   4  → fully onboarded         → normal command routing
+
+FIXES:
+1. phone passed to ai_advice so conversation history works
+2. State detection from district dictionary
+3. All imports consistent with services.py function names
 """
 
 from database import (
@@ -19,37 +24,58 @@ from services import (
 )
 from config import LANGUAGES, LANG_NAMES
 
+
 # ══════════════════════════════════════════════════
 # DISTRICT → STATE MAPPING
 # ══════════════════════════════════════════════════
 
-DISTRICT_TO_STATE = {
+DISTRICT_TO_STATE: dict = {
     "kolkata": "West Bengal", "howrah": "West Bengal", "darjeeling": "West Bengal",
-    "karnal": "Haryana", "hisar": "Haryana", "rohtak": "Haryana", "gurgaon": "Haryana", "faridabad": "Haryana",
-    "ludhiana": "Punjab", "amritsar": "Punjab", "jalandhar": "Punjab", "patiala": "Punjab",
-    "nashik": "Maharashtra", "pune": "Maharashtra", "mumbai": "Maharashtra", "nagpur": "Maharashtra", "aurangabad": "Maharashtra",
-    "jaipur": "Rajasthan", "jodhpur": "Rajasthan", "udaipur": "Rajasthan", "kota": "Rajasthan",
-    "lucknow": "Uttar Pradesh", "agra": "Uttar Pradesh", "varanasi": "Uttar Pradesh", "kanpur": "Uttar Pradesh", "meerut": "Uttar Pradesh",
+    "siliguri": "West Bengal", "asansol": "West Bengal", "durgapur": "West Bengal",
+    "karnal": "Haryana", "hisar": "Haryana", "rohtak": "Haryana",
+    "gurgaon": "Haryana", "faridabad": "Haryana", "ambala": "Haryana",
+    "ludhiana": "Punjab", "amritsar": "Punjab", "jalandhar": "Punjab",
+    "patiala": "Punjab", "bathinda": "Punjab", "mohali": "Punjab",
+    "nashik": "Maharashtra", "pune": "Maharashtra", "mumbai": "Maharashtra",
+    "nagpur": "Maharashtra", "aurangabad": "Maharashtra", "solapur": "Maharashtra",
+    "jaipur": "Rajasthan", "jodhpur": "Rajasthan", "udaipur": "Rajasthan",
+    "kota": "Rajasthan", "bikaner": "Rajasthan", "ajmer": "Rajasthan",
+    "lucknow": "Uttar Pradesh", "agra": "Uttar Pradesh", "varanasi": "Uttar Pradesh",
+    "kanpur": "Uttar Pradesh", "meerut": "Uttar Pradesh", "allahabad": "Uttar Pradesh",
+    "prayagraj": "Uttar Pradesh", "gorakhpur": "Uttar Pradesh", "aligarh": "Uttar Pradesh",
     "patna": "Bihar", "gaya": "Bihar", "muzaffarpur": "Bihar",
-    "bhopal": "Madhya Pradesh", "indore": "Madhya Pradesh", "gwalior": "Madhya Pradesh", "jabalpur": "Madhya Pradesh",
-    "ahmedabad": "Gujarat", "surat": "Gujarat", "vadodara": "Gujarat", "rajkot": "Gujarat",
+    "bhagalpur": "Bihar", "darbhanga": "Bihar",
+    "bhopal": "Madhya Pradesh", "indore": "Madhya Pradesh", "gwalior": "Madhya Pradesh",
+    "jabalpur": "Madhya Pradesh", "ujjain": "Madhya Pradesh",
+    "ahmedabad": "Gujarat", "surat": "Gujarat", "vadodara": "Gujarat",
+    "rajkot": "Gujarat", "bhavnagar": "Gujarat", "anand": "Gujarat",
     "hyderabad": "Telangana", "warangal": "Telangana", "nizamabad": "Telangana",
-    "bangalore": "Karnataka", "mysore": "Karnataka", "hubli": "Karnataka", "mangalore": "Karnataka",
-    "chennai": "Tamil Nadu", "coimbatore": "Tamil Nadu", "madurai": "Tamil Nadu", "salem": "Tamil Nadu",
+    "karimnagar": "Telangana", "khammam": "Telangana",
+    "bangalore": "Karnataka", "bengaluru": "Karnataka", "mysore": "Karnataka",
+    "hubli": "Karnataka", "mangalore": "Karnataka", "belgaum": "Karnataka",
+    "chennai": "Tamil Nadu", "coimbatore": "Tamil Nadu", "madurai": "Tamil Nadu",
+    "salem": "Tamil Nadu", "tiruchirappalli": "Tamil Nadu", "tirupur": "Tamil Nadu",
     "delhi": "Delhi", "new delhi": "Delhi",
     "dehradun": "Uttarakhand", "haridwar": "Uttarakhand", "rishikesh": "Uttarakhand",
+    "nainital": "Uttarakhand", "roorkee": "Uttarakhand",
     "ranchi": "Jharkhand", "jamshedpur": "Jharkhand", "dhanbad": "Jharkhand",
+    "bokaro": "Jharkhand", "hazaribagh": "Jharkhand",
     "bhubaneswar": "Odisha", "cuttack": "Odisha", "puri": "Odisha",
+    "rourkela": "Odisha", "berhampur": "Odisha",
     "guwahati": "Assam", "dibrugarh": "Assam", "silchar": "Assam",
+    "jorhat": "Assam", "nagaon": "Assam",
     "shimla": "Himachal Pradesh", "manali": "Himachal Pradesh", "dharamsala": "Himachal Pradesh",
     "jammu": "Jammu & Kashmir", "srinagar": "Jammu & Kashmir",
     "raipur": "Chhattisgarh", "bilaspur": "Chhattisgarh", "durg": "Chhattisgarh",
     "thiruvananthapuram": "Kerala", "kochi": "Kerala", "kozhikode": "Kerala",
-    "visakhapatnam": "Andhra Pradesh", "vijayawada": "Andhra Pradesh", "guntur": "Andhra Pradesh",
+    "thrissur": "Kerala", "kollam": "Kerala",
+    "visakhapatnam": "Andhra Pradesh", "vijayawada": "Andhra Pradesh",
+    "guntur": "Andhra Pradesh", "nellore": "Andhra Pradesh", "kurnool": "Andhra Pradesh",
 }
 
+
 # ══════════════════════════════════════════════════
-# Intent detection helpers
+# Intent detection
 # ══════════════════════════════════════════════════
 
 def _is_mandi(text: str) -> bool:
@@ -61,6 +87,7 @@ def _is_mandi(text: str) -> bool:
     }
     return any(k in text for k in keywords)
 
+
 def _is_weather(text: str) -> bool:
     keywords = {
         "weather", "mausam", "mosam", "barish", "baarish", "rain",
@@ -68,6 +95,7 @@ def _is_weather(text: str) -> bool:
         "kal mausam", "aaj mausam", "forecast",
     }
     return any(k in text for k in keywords)
+
 
 def _is_subsidy(text: str) -> bool:
     keywords = {
@@ -77,16 +105,19 @@ def _is_subsidy(text: str) -> bool:
     }
     return any(k in text for k in keywords)
 
+
 def _is_greeting(text: str) -> bool:
     keywords = {
         "namaste", "namaskar", "hello", "hi", "hey",
-        "ram ram", "sat sri akal", "salaam",       "bhai", "haan", "theek hai", "ok", "okay", "achha", "thik",
+        "ram ram", "sat sri akal", "salaam",
+        "bhai", "haan", "theek hai", "ok", "okay", "achha", "thik",
     }
     return any(k in text for k in keywords)
 
+
 def _is_help(text: str) -> bool:
-    keywords = {"help", "menu", "commands", "kya kar sakte", "features", "kya karta"}
-    return any(k in text for k in keywords)
+    return any(k in text for k in {"help", "menu", "commands", "kya kar sakte", "features", "kya karta"})
+
 
 def _extract_crop(text: str, default: str) -> str:
     for alias, name in CROP_ALIASES.items():
@@ -94,25 +125,25 @@ def _extract_crop(text: str, default: str) -> str:
             return name
     return default
 
+
 # ══════════════════════════════════════════════════
 # Main message processor
 # ══════════════════════════════════════════════════
 
 async def process_message(phone: str, message: str) -> str:
+    """Entry point. All exceptions caught here — never returns 500."""
     try:
         return await _route(phone, message)
     except Exception as exc:
         print(f"[KisanAI ERROR] phone={phone} msg={message!r} err={exc!r}")
-        return (
-            "\u26a0\ufe0f Kuch technical problem aa gayi. "
-            "Thodi der mein dobara try karein. \U0001F64F"
-        )
+        return "\u26a0\ufe0f Kuch technical problem aa gayi. Thodi der mein dobara try karein."
+
 
 async def _route(phone: str, message: str) -> str:
     farmer = get_farmer(phone)
     low = message.lower().strip()
 
-    # ── STEP 0: Brand new user
+    # ── STEP 0: Brand new user ──────────────────────────────────────────
     if farmer is None:
         create_farmer(phone)
         return (
@@ -120,14 +151,14 @@ async def _route(phone: str, message: str) -> str:
             "Main aapki madad kar sakta hoon:\n"
             "  \U0001F331 Fasal ki samasya\n"
             "  \U0001F4B0 Mandi ka sahi bhav\n"
-            "  \U0001F327\ufe0f Mausam ki jaankari\n"
+            "  \U0001F327 Mausam ki jaankari\n"
             "  \U0001F4CB Sarkari yojnaein\n\n"
             "Shuru karein — aapka naam kya hai?"
         )
 
     step = farmer.get("onboarding_step", 0)
 
-    # ── STEP 0 → 1: Save name
+    # ── STEP 0 → 1: Save name ───────────────────────────────────────────
     if step == 0:
         name = message.strip()[:50] or "Kisan bhai"
         update_farmer(phone, name=name)
@@ -135,13 +166,13 @@ async def _route(phone: str, message: str) -> str:
         return (
             f"Namaste {name} ji! \U0001F64F\n\n"
             "Aap kis bhasha mein baat karna chahte hain?\n\n"
-            "  1 \u2014 Hindi\n"
-            "  2 \u2014 English\n"
-            "  3 \u2014 Punjabi\n\n"
+            "  1 — Hindi\n"
+            "  2 — English\n"
+            "  3 — Punjabi\n\n"
             "1, 2, ya 3 reply karein."
         )
 
-    # ── STEP 1 → 2: Save language
+    # ── STEP 1 → 2: Save language ───────────────────────────────────────
     if step == 1:
         lang = LANGUAGES.get(low, "hi")
         lang_name = LANG_NAMES.get(lang, "Hindi")
@@ -149,7 +180,7 @@ async def _route(phone: str, message: str) -> str:
         advance_step(phone, 2)
         return f"  {lang_name} set! \u2705\n\nAap mainly kaun si fasal ugaate hain?"
 
-    # ── STEP 2 → 3: Save crop
+    # ── STEP 2 → 3: Save crop ───────────────────────────────────────────
     if step == 2:
         crop = message.strip()[:50] or "fasal"
         update_farmer(phone, crop=crop)
@@ -160,7 +191,7 @@ async def _route(phone: str, message: str) -> str:
             "Main aapke liye local mausam aur mandi bhav laaunga."
         )
 
-    # ── STEP 3 → 4: Save location + state, show weather + mandi
+    # ── STEP 3 → 4: Save location + detect state ────────────────────────
     if step == 3:
         district = message.strip()[:60] or ""
         if not district:
@@ -171,15 +202,13 @@ async def _route(phone: str, message: str) -> str:
 
         if not found:
             return (
-                f"  '{district}' nahi mila. \n\n"
+                f"  '{district}' nahi mila.\n\n"
                 "Kripya nearest bade shahar ya district ka naam bataiye.\n"
                 "Jaise: 'Karnal', 'Nashik', 'Ludhiana', 'Jaipur'"
             )
 
-        # Detect state from district
         detected_state = DISTRICT_TO_STATE.get(district.lower().strip(), "")
 
-        # Persist location + state and mark onboarded
         update_farmer(
             phone,
             district=district,
@@ -190,12 +219,12 @@ async def _route(phone: str, message: str) -> str:
             onboarded=1,
         )
 
-        # Fetch weather and mandi (outside DB context — correct)
         weather = await fetch_weather(lat, lon, district)
         mandi_records = await fetch_mandi(crop, detected_state)
         mandi_text = format_mandi(mandi_records, limit=3)
 
-        return (           f"  {district} set! \u2705\n\n"
+        return (
+            f"  {district} set! \u2705\n\n"
             f"{weather}\n\n"
             f"  {crop} mandi prices:\n{mandi_text}\n\n"
             "Sab kuch tayar hai! Ab kuch bhi poochhen. \U0001F33E"
@@ -207,25 +236,23 @@ async def _route(phone: str, message: str) -> str:
     crop = farmer.get("crop") or "fasal"
 
     if _is_help(low):
-        resp = (
-            "  \U0001F33E KisanAI kya kar sakta hai:\n\n"
-            "  Poochhen: keede, khaad, sinchai, bimari\n"
-            "  'mandi'   \u2014 aaj ka bhav\n"
-            "  'mausam'  \u2014 mausam ka haal\n"
-            "  'yojna'   \u2014 sarkari schemes\n"
-        )
         touch_farmer(phone)
-        return resp
+        return (
+            "\U0001F33E *KisanAI kya kar sakta hai:*\n\n"
+            "  Poochhen: keede, khaad, sinchai, bimari\n"
+            "  'mandi'  — aaj ka bhav\n"
+            "  'mausam' — mausam ka haal\n"
+            "  'yojna'  — sarkari schemes\n"
+        )
 
     if _is_greeting(low):
-        resp = f"\U0001F33E Namaste {name} ji!\nAaj {crop} ke baare mein kya jaanna hai?"
         touch_farmer(phone)
-        return resp
+        return f"\U0001F33E Namaste {name} ji!\nAaj {crop} ke baare mein kya jaanna hai?"
 
     if _is_mandi(low):
         crop_q = _extract_crop(low, crop)
         mandi_records = await fetch_mandi(crop_q, farmer.get("state", ""))
-        resp = f"  {crop_q} mandi prices:\n\n{format_mandi(mandi_records)}"
+        resp = f"  *{crop_q} mandi prices:*\n\n{format_mandi(mandi_records)}"
         save_message(phone, "bot", resp)
         touch_farmer(phone)
         return resp
@@ -247,8 +274,10 @@ async def _route(phone: str, message: str) -> str:
         return resp
 
     # Default — AI advisory
+    # FIX: pass phone explicitly so ai_advice can fetch conversation history
     save_message(phone, "user", message)
-    advice = await ai_advice(message, farmer)
+    farmer_with_phone = {**farmer, "phone": phone}
+    advice = await ai_advice(message, farmer_with_phone)
     resp = f"  \U0001F331 KisanAI Salah:\n\n{advice}"
     save_message(phone, "bot", resp)
     touch_farmer(phone)
