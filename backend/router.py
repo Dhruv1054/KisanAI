@@ -15,7 +15,7 @@ from database import (
 )
 from services import (
     geocode, fetch_weather, fetch_mandi, format_mandi,
-    get_subsidy_info, get_ai_advice, CROP_ALIASES,
+    get_subsidy_info, ai_advice, CROP_ALIASES,
 )
 from config import LANGUAGES, LANG_NAMES
 
@@ -248,7 +248,7 @@ async def _route(phone: str, message: str) -> str:
 
     # Default — AI advisory
     save_message(phone, "user", message)
-    advice = await get_ai_advice(message, farmer, phone)
+    advice = await ai_advice(message, farmer)
     resp = f"  \U0001F331 KisanAI Salah:\n\n{advice}"
     save_message(phone, "bot", resp)
     touch_farmer(phone)
