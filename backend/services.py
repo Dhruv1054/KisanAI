@@ -1,12 +1,5 @@
 """
 services.py — all external API calls for KisanAI
-
-FIXES:
-1. Weather URL: use params dict instead of f-string to avoid %2F encoding
-   (this was causing "mausam unavailable" on Railway for all cities)
-2. Conversation history restored in ai_advice()
-3. ai_advice response: 80 words max, 3 points, WhatsApp-friendly formatting
-4. Subsidy formatting uses *bold* for WhatsApp
 """
 
 import httpx
@@ -63,17 +56,17 @@ _WMO_CODES: dict = {
 def _fmt_weather(temp, hum, wind, wcode, max_t, min_t, rain_pct, district: str) -> str:
     condition = _WMO_CODES.get(wcode, "Clear")
     lines = [
-        f"\u2600\ufe0f {district}",
-        f"  {temp}\u00b0C  {condition}",
-        f"  Min {min_t}\u00b0C / Max {max_t}\u00b0C",
+        f"☀️ {district}",
+        f"  {temp}°C  {condition}",
+        f"  Min {min_t}°C / Max {max_t}°C",
         f"  Humidity {hum}%  |  Wind {wind} km/h  |  Rain {rain_pct}%",
     ]
     if rain_pct > 70:
-        lines.append("  \u26a0\ufe0f Bhari baarish — sinchai aur spray band rakhen.")
+        lines.append("  ⚠️ Bhari baarish — sinchai aur spray band rakhen.")
     elif rain_pct > 40:
         lines.append("  Halki baarish sambhav — pani kam dein.")
     else:
-        lines.append("  \u2705 Saaf mausam — khet ka kaam karein.")
+        lines.append("  ✅ Saaf mausam — khet ka kaam karein.")
     try:
         if float(str(temp)) > 38:
             lines.append("  Garmi zyada — subah/shaam sinchai karein.")
@@ -83,10 +76,6 @@ def _fmt_weather(temp, hum, wind, wcode, max_t, min_t, rain_pct, district: str) 
 
 
 async def fetch_weather(lat: float, lon: float, district: str = "") -> str:
-    """
-    FIX: Use params dict — httpx handles encoding correctly.
-    f-string was encoding / as %2F which open-meteo rejected.
-    """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(
@@ -94,10 +83,14 @@ async def fetch_weather(lat: float, lon: float, district: str = "") -> str:
                 params={
                     "latitude": lat,
                     "longitude": lon,
-                    "current": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code",
+                    "current": (
+                        "temperature_2m,apparent_temperature,"
+                        "relative_humidity_2m,precipitation,"
+                        "wind_speed_10m,weather_code"
+                    ),
                     "daily": "precipitation_probability_max,temperature_2m_max,temperature_2m_min",
                     "timezone": "Asia/Kolkata",
-                    "forecast_days": 3,
+                    "forecast_days": 1,
                 },
             )
             if r.status_code == 200:
@@ -114,13 +107,13 @@ async def fetch_weather(lat: float, lon: float, district: str = "") -> str:
                     rain_pct=day.get("precipitation_probability_max", [0])[0],
                     district=district,
                 )
-    except Exception:
-        pass
-    return f"\u26a0\ufe0f {district or 'aapke ilaake'} ka mausam abhi unavailable hai. Thodi der mein try karein."
+            print(f"[weather] HTTP {r.status_code} lat={lat} lon={lon}: {r.text[:200]}")
+    except Exception as exc:
+        print(f"[weather] exception lat={lat} lon={lon}: {exc!r}")
+    return f"⚠️ {district or 'aapke ilaake'} ka mausam abhi unavailable hai. Thodi der mein try karein."
 
 
 async def fetch_weather_raw(lat: float, lon: float) -> dict:
-    """FIX: params dict used here too."""
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             r = await client.get(
@@ -149,13 +142,6 @@ async def fetch_weather_raw(lat: float, lon: float) -> dict:
 # MANDI PRICES
 # ══════════════════════════════════════════════════
 
-_MANDI_FALLBACK: list = [
-    {"market": "Azadpur Mandi, Delhi", "commodity": "Wheat", "min": "1800", "max": "2200", "modal": "2000"},
-    {"market": "Khanna Mandi, Punjab", "commodity": "Wheat", "min": "1700", "max": "2100", "modal": "1900"},
-    {"market": "Agra Mandi, UP",       "commodity": "Wheat", "min": "1650", "max": "1950", "modal": "1800"},
-    {"market": "Indore Mandi, MP",     "commodity": "Wheat", "min": "1750", "max": "2050", "modal": "1900"},
-]
-
 CROP_ALIASES: dict = {
     "gehu": "Wheat",    "wheat": "Wheat",
     "dhan": "Paddy",    "paddy": "Paddy",
@@ -168,42 +154,122 @@ CROP_ALIASES: dict = {
     "arhar": "Tur",     "tur": "Tur",
 }
 
+# Fallback data based on 2024-25 MSP / typical market ranges, organised by crop
+_MANDI_FALLBACK_BY_CROP: dict = {
+    "Wheat": [
+        {"market": "Azadpur Mandi, Delhi",    "min": "2100", "max": "2450", "modal": "2275"},
+        {"market": "Khanna Mandi, Punjab",    "min": "2050", "max": "2400", "modal": "2250"},
+        {"market": "Agra Mandi, UP",          "min": "2000", "max": "2350", "modal": "2200"},
+        {"market": "Hapur Mandi, UP",         "min": "2050", "max": "2380", "modal": "2220"},
+    ],
+    "Paddy": [
+        {"market": "Patna Mandi, Bihar",      "min": "2100", "max": "2500", "modal": "2300"},
+        {"market": "Burdwan Mandi, WB",       "min": "2050", "max": "2450", "modal": "2280"},
+        {"market": "Karimnagar Mandi, TS",    "min": "2000", "max": "2400", "modal": "2250"},
+        {"market": "Nizamabad Mandi, TS",     "min": "2100", "max": "2500", "modal": "2300"},
+    ],
+    "Rice": [
+        {"market": "Kolkata Mandi, WB",       "min": "3000", "max": "4000", "modal": "3500"},
+        {"market": "Chennai Mandi, TN",       "min": "2800", "max": "3800", "modal": "3300"},
+        {"market": "Hyderabad Mandi, TS",     "min": "2900", "max": "3900", "modal": "3400"},
+        {"market": "Lucknow Mandi, UP",       "min": "2700", "max": "3700", "modal": "3200"},
+    ],
+    "Mustard": [
+        {"market": "Jaipur Mandi, Rajasthan", "min": "5600", "max": "6300", "modal": "5950"},
+        {"market": "Alwar Mandi, Rajasthan",  "min": "5500", "max": "6200", "modal": "5850"},
+        {"market": "Bharatpur Mandi, Raj.",   "min": "5550", "max": "6250", "modal": "5900"},
+        {"market": "Agra Mandi, UP",          "min": "5600", "max": "6300", "modal": "5950"},
+    ],
+    "Onion": [
+        {"market": "Lasalgaon Mandi, MH",     "min": "1200", "max": "2800", "modal": "2000"},
+        {"market": "Nashik Mandi, MH",        "min": "1100", "max": "2700", "modal": "1900"},
+        {"market": "Azadpur Mandi, Delhi",    "min": "1500", "max": "3000", "modal": "2200"},
+        {"market": "Hubli Mandi, KA",         "min": "1000", "max": "2500", "modal": "1800"},
+    ],
+    "Potato": [
+        {"market": "Agra Mandi, UP",          "min": "800",  "max": "1600", "modal": "1200"},
+        {"market": "Kolkata Mandi, WB",       "min": "700",  "max": "1500", "modal": "1100"},
+        {"market": "Jalandhar Mandi, PB",     "min": "750",  "max": "1550", "modal": "1150"},
+        {"market": "Indore Mandi, MP",        "min": "780",  "max": "1580", "modal": "1180"},
+    ],
+    "Maize": [
+        {"market": "Gulbarga Mandi, KA",      "min": "2000", "max": "2450", "modal": "2225"},
+        {"market": "Davangere Mandi, KA",     "min": "1950", "max": "2400", "modal": "2200"},
+        {"market": "Nizamabad Mandi, TS",     "min": "2000", "max": "2450", "modal": "2225"},
+        {"market": "Warangal Mandi, TS",      "min": "1980", "max": "2430", "modal": "2210"},
+    ],
+    "Gram": [
+        {"market": "Indore Mandi, MP",        "min": "5000", "max": "5800", "modal": "5400"},
+        {"market": "Kota Mandi, Rajasthan",   "min": "4900", "max": "5700", "modal": "5300"},
+        {"market": "Nagpur Mandi, MH",        "min": "5100", "max": "5900", "modal": "5500"},
+        {"market": "Gulbarga Mandi, KA",      "min": "5000", "max": "5800", "modal": "5400"},
+    ],
+    "Tur": [
+        {"market": "Latur Mandi, MH",         "min": "6500", "max": "7500", "modal": "7000"},
+        {"market": "Gulbarga Mandi, KA",      "min": "6400", "max": "7400", "modal": "6900"},
+        {"market": "Akola Mandi, MH",         "min": "6600", "max": "7600", "modal": "7100"},
+        {"market": "Nizamabad Mandi, TS",     "min": "6500", "max": "7500", "modal": "7000"},
+    ],
+}
+
+
+def _get_fallback(crop: str) -> list:
+    """Return crop-appropriate fallback mandi data with correct commodity label."""
+    canon = CROP_ALIASES.get(crop.lower(), crop.title())
+    rows = _MANDI_FALLBACK_BY_CROP.get(canon) or _MANDI_FALLBACK_BY_CROP.get(crop.title(), _MANDI_FALLBACK_BY_CROP["Wheat"])
+    return [{"market": r["market"], "commodity": canon, "min": r["min"], "max": r["max"], "modal": r["modal"]} for r in rows]
+
 
 async def fetch_mandi(crop: str = "", state: str = "") -> list:
+    crop_canon = CROP_ALIASES.get(crop.lower(), crop) if crop else ""
+
     if not DATA_GOV_IN_KEY:
-        return [{**e, "commodity": crop or e["commodity"]} for e in _MANDI_FALLBACK]
-    params: dict = {"api-key": DATA_GOV_IN_KEY, "format": "json", "limit": 5}
-    if crop:
-        params["filters[Commodity.keyword]"] = crop
+        return _get_fallback(crop_canon or "Wheat")
+
+    # Correct filter syntax for data.gov.in — no .keyword suffix (was a bug)
+    params: dict = {"api-key": DATA_GOV_IN_KEY, "format": "json", "limit": 10}
+    if crop_canon:
+        params["filters[Commodity]"] = crop_canon
     if state:
-        params["filters[State.keyword]"] = state
+        params["filters[State]"] = state
+
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(MANDI_API_URL, params=params)
             if r.status_code == 200:
                 records = r.json().get("records", [])[:5]
                 if records:
-                    return [
-                        {
-                            "market":    rec.get("Market", "?"),
-                            "commodity": rec.get("Commodity", crop),
-                            "min":       rec.get("Min Price", "N/A"),
-                            "max":       rec.get("Max Price", "N/A"),
-                            "modal":     rec.get("Modal Price", "N/A"),
-                        }
-                        for rec in records
-                    ]
-    except Exception:
-        pass
-    return [{**e, "commodity": crop or e["commodity"]} for e in _MANDI_FALLBACK]
+                    parsed = []
+                    for rec in records:
+                        # API may return snake_case or TitleCase field names
+                        parsed.append({
+                            "market":    rec.get("market") or rec.get("Market", "?"),
+                            "commodity": rec.get("commodity") or rec.get("Commodity", crop_canon),
+                            "min":       rec.get("min_price") or rec.get("Min Price", "N/A"),
+                            "max":       rec.get("max_price") or rec.get("Max Price", "N/A"),
+                            "modal":     rec.get("modal_price") or rec.get("Modal Price", "N/A"),
+                        })
+                    if any(p["market"] != "?" for p in parsed):
+                        return parsed
+            else:
+                print(f"[mandi] HTTP {r.status_code}: {r.text[:200]}")
+    except Exception as exc:
+        print(f"[mandi] exception: {exc!r}")
+
+    return _get_fallback(crop_canon or "Wheat")
 
 
 def format_mandi(records: list, limit: int = 4) -> str:
     lines = []
     for r in records[:limit]:
+        market    = r.get("market",    r.get("Market",      "?"))
+        commodity = r.get("commodity", r.get("Commodity",   "?"))
+        modal     = r.get("modal",     r.get("modal_price", r.get("Modal Price", "N/A")))
+        lo        = r.get("min",       r.get("min_price",   r.get("Min Price",   "N/A")))
+        hi        = r.get("max",       r.get("max_price",   r.get("Max Price",   "N/A")))
         lines.append(
-            f"  {r['market']}\n"
-            f"     {r['commodity']}: Rs{r['modal']}/quintal (Rs{r['min']}-Rs{r['max']})"
+            f"  {market}\n"
+            f"     {commodity}: Rs{modal}/quintal (Rs{lo}-Rs{hi})"
         )
     return "\n".join(lines)
 
@@ -246,11 +312,6 @@ def get_subsidy_info(query: str = "") -> str:
 # ══════════════════════════════════════════════════
 
 async def ai_advice(message: str, farmer: dict) -> str:
-    """
-    AI-powered farm advice.
-    FIX: Conversation history restored using farmer["phone"].
-    FIX: Response capped at 80 words, max 3 points.
-    """
     crop = farmer.get("crop", "fasal")
     district = farmer.get("district", "India")
     lang = farmer.get("language", "hi")
@@ -269,7 +330,6 @@ async def ai_advice(message: str, farmer: dict) -> str:
         "If unsure, say: nishchit nahi, kisi agronomist se poochhen."
     )
 
-    # Conversation history for context
     messages = [{"role": "system", "content": system}]
     if phone:
         try:
@@ -299,7 +359,7 @@ async def ai_advice(message: str, farmer: dict) -> str:
         except Exception:
             pass
 
-    # Keyword fallbacks
+    # Keyword fallbacks when OpenRouter is unavailable
     low = message.lower()
     if any(w in low for w in ["pest", "insect", "bug", "kida", "keeda"]):
         return "*Keeda control:*\n1. Neem oil 5ml/L spray\n2. Imidacloprid 0.3ml/L har 7 din\n3. Patte ke neeche bhi spray karein"

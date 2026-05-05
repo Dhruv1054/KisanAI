@@ -19,7 +19,8 @@ OPENROUTER_URL: str = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL: str = "qwen/qwen-2.5-72b-instruct"
 
 # External APIs
-DATA_GOV_IN_KEY: str = os.getenv("DATA_GOV_IN_KEY", "")
+# data.gov.in public demo key — rate-limited (~100 req/day); override with DATA_GOV_IN_KEY env var
+DATA_GOV_IN_KEY: str = os.getenv("DATA_GOV_IN_KEY", "579b464db66ec23bdd0000016f625c2c8d4e4564bba38da6e52a6")
 MANDI_API_URL: str = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
 WEATHER_API_URL: str = "https://api.open-meteo.com/v1/forecast"
 GEOCODE_API_URL: str = "https://nominatim.openstreetmap.org/search"
