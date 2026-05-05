@@ -284,61 +284,65 @@ _FALLBACK_ADVICE: list[tuple] = [
 ]
 
 
-async def get_ai_advice(message: str, farmer: dict, phone: str) -> str:
-    """
-    Returns AI-powered farm advice with conversation history context.
-    Falls back to keyword matching if OpenRouter is unavailable.
-    """
-    crop = farmer.get("crop", "fasal")
+async def ai_advice(message: str, farmer: dict) -> str:
+    """Get AI-powered crop advice for the farmer's specific situation."""
+    crop = farmer.get("crop", "general")
     district = farmer.get("district", "India")
-    lang = farmer.get("language", "hi")
-
     system = (
-        f"You are KisanAI, an expert farm advisor for Indian farmers. "
-        f"This farmer grows {crop} in {district}. "
-        f"{LANG_INSTRUCTIONS.get(lang, LANG_INSTRUCTIONS['hi'])} "
-        "Keep responses under 150 words. Use short paragraphs. "
-        "Write like a knowledgeable farmer friend — practical, warm, no jargon. "
-        "Never make up facts. If unsure, say 'nishchit nahi, kisi agronomist se poochhen'."
+        f"You are KisanAI, a farm advisor for Indian farmers. "
+        f"The farmer grows {crop} in {district}. "
+        "Respond in the same language the user writes in (Hindi or English). "
+        "Keep responses under 80 words. Use simple numbered points — max 3. "
+        "Use WhatsApp formatting: *bold* not **bold**. "
+        "Write like a farmer friend, not a textbook. "
+        "Never hallucinate legal or medical information."
     )
-
-    # Build message history for context
-    history = get_recent_messages(phone, limit=4)
-    messages = [{"role": "system", "content": system}]
-    for h in history:
-        role = "user" if h["direction"] == "user" else "assistant"
-        messages.append({"role": role, "content": h["message"]})
-    messages.append({"role": "user", "content": message})
-
     if OPENROUTER_KEY:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.post(
                     OPENROUTER_URL,
                     json={
-                        "model": OPENROUTER_MODEL,
-                        "messages": messages,
-                        "max_tokens": 400,
+                        "model": "openrouter/qwen/qwen-2.5-72b-instruct",
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": message},
+                        ],
+                        "max_tokens": 300,
                     },
                     headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
                 )
                 if r.status_code == 200:
-                    content = (
-                        r.json()
-                        .get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                        .strip()
-                    )
+                    data = r.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if content:
                         return content
         except Exception:
             pass
 
-    # Keyword fallback
-    low = message.lower()
-    for keywords, advice in _FALLBACK_ADVICE:
-        if any(kw in low for kw in keywords):
-            return advice
-
-    return f"{crop} ki niyamit dekhbhal karein — sinchai, khaad, aur keede ka dhyan rakhein."
+    # Fallback: keyword-matched advice
+    lower = message.lower()
+    if any(w in lower for w in ["pest", "insect", "pesticide", "bug"]):
+        return (
+            "*Neem oil* 5ml/L spray\n"
+            "1. Imidacloprid 0.3ml/L every 7 days\n"
+            "2. Spray under leaves too"
+        )
+    if any(w in lower for w in ["fertilizer", "urea", "dap", "npk"]):
+        return (
+            "*Urea* 100kg/acre (at 30, 45, 60 days)\n"
+            "1. DAP 50kg/acre at sowing\n"
+            "2. Get soil test for exact amounts"
+        )
+    if any(w in lower for w in ["irrig", "water"]):
+        return (
+            "*Summer:* irrigate every 5-7 days\n"
+            "1. *Winter:* every 10-14 days\n"
+            "2. Stop before rain"
+        )
+    return (
+        f"*{crop}* tips:\n"
+        "1. Monitor daily\n"
+        "2. Proper irrigation + balanced fertilizer\n"
+        "3. Timely pest control"
+    )

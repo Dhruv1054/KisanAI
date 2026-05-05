@@ -7,16 +7,6 @@ Onboarding steps:
   2  → language saved          → ask crop
   3  → crop saved              → ask district
   4  → fully onboarded         → normal command routing
-
-BUG FIX: "hello" as first message caused Internal Server Error because:
-  1. farmer was None → created with step=0
-  2. On the SAME call, code fell through to onboarded routing
-  3. Greeting handler matched "hello" but farmer["name"] was None → TypeError
-  Fix: create farmer + return welcome in one shot, never fall through.
-
-BUG FIX: Geocoding rejection of cities near Delhi (Karnal, Panipat etc.)
-  Old code: rejected any coords within 0.05° of Delhi default
-  New code: geocode() returns success=False only when Nominatim returns empty
 """
 
 from database import (
@@ -29,6 +19,34 @@ from services import (
 )
 from config import LANGUAGES, LANG_NAMES
 
+# ══════════════════════════════════════════════════
+# DISTRICT → STATE MAPPING
+# ══════════════════════════════════════════════════
+
+DISTRICT_TO_STATE = {
+    "kolkata": "West Bengal", "howrah": "West Bengal", "darjeeling": "West Bengal",
+    "karnal": "Haryana", "hisar": "Haryana", "rohtak": "Haryana", "gurgaon": "Haryana", "faridabad": "Haryana",
+    "ludhiana": "Punjab", "amritsar": "Punjab", "jalandhar": "Punjab", "patiala": "Punjab",
+    "nashik": "Maharashtra", "pune": "Maharashtra", "mumbai": "Maharashtra", "nagpur": "Maharashtra", "aurangabad": "Maharashtra",
+    "jaipur": "Rajasthan", "jodhpur": "Rajasthan", "udaipur": "Rajasthan", "kota": "Rajasthan",
+    "lucknow": "Uttar Pradesh", "agra": "Uttar Pradesh", "varanasi": "Uttar Pradesh", "kanpur": "Uttar Pradesh", "meerut": "Uttar Pradesh",
+    "patna": "Bihar", "gaya": "Bihar", "muzaffarpur": "Bihar",
+    "bhopal": "Madhya Pradesh", "indore": "Madhya Pradesh", "gwalior": "Madhya Pradesh", "jabalpur": "Madhya Pradesh",
+    "ahmedabad": "Gujarat", "surat": "Gujarat", "vadodara": "Gujarat", "rajkot": "Gujarat",
+    "hyderabad": "Telangana", "warangal": "Telangana", "nizamabad": "Telangana",
+    "bangalore": "Karnataka", "mysore": "Karnataka", "hubli": "Karnataka", "mangalore": "Karnataka",
+    "chennai": "Tamil Nadu", "coimbatore": "Tamil Nadu", "madurai": "Tamil Nadu", "salem": "Tamil Nadu",
+    "delhi": "Delhi", "new delhi": "Delhi",
+    "dehradun": "Uttarakhand", "haridwar": "Uttarakhand", "rishikesh": "Uttarakhand",
+    "ranchi": "Jharkhand", "jamshedpur": "Jharkhand", "dhanbad": "Jharkhand",
+    "bhubaneswar": "Odisha", "cuttack": "Odisha", "puri": "Odisha",
+    "guwahati": "Assam", "dibrugarh": "Assam", "silchar": "Assam",
+    "shimla": "Himachal Pradesh", "manali": "Himachal Pradesh", "dharamsala": "Himachal Pradesh",
+    "jammu": "Jammu & Kashmir", "srinagar": "Jammu & Kashmir",
+    "raipur": "Chhattisgarh", "bilaspur": "Chhattisgarh", "durg": "Chhattisgarh",
+    "thiruvananthapuram": "Kerala", "kochi": "Kerala", "kozhikode": "Kerala",
+    "visakhapatnam": "Andhra Pradesh", "vijayawada": "Andhra Pradesh", "guntur": "Andhra Pradesh",
+}
 
 # ══════════════════════════════════════════════════
 # Intent detection helpers
@@ -43,7 +61,6 @@ def _is_mandi(text: str) -> bool:
     }
     return any(k in text for k in keywords)
 
-
 def _is_weather(text: str) -> bool:
     keywords = {
         "weather", "mausam", "mosam", "barish", "baarish", "rain",
@@ -51,7 +68,6 @@ def _is_weather(text: str) -> bool:
         "kal mausam", "aaj mausam", "forecast",
     }
     return any(k in text for k in keywords)
-
 
 def _is_subsidy(text: str) -> bool:
     keywords = {
@@ -61,20 +77,16 @@ def _is_subsidy(text: str) -> bool:
     }
     return any(k in text for k in keywords)
 
-
 def _is_greeting(text: str) -> bool:
     keywords = {
         "namaste", "namaskar", "hello", "hi", "hey",
-        "ram ram", "sat sri akal", "salaam",
-        "bhai", "haan", "theek hai", "ok", "okay", "achha", "thik",
+        "ram ram", "sat sri akal", "salaam",       "bhai", "haan", "theek hai", "ok", "okay", "achha", "thik",
     }
     return any(k in text for k in keywords)
-
 
 def _is_help(text: str) -> bool:
     keywords = {"help", "menu", "commands", "kya kar sakte", "features", "kya karta"}
     return any(k in text for k in keywords)
-
 
 def _extract_crop(text: str, default: str) -> str:
     for alias, name in CROP_ALIASES.items():
@@ -82,33 +94,25 @@ def _extract_crop(text: str, default: str) -> str:
             return name
     return default
 
-
 # ══════════════════════════════════════════════════
 # Main message processor
 # ══════════════════════════════════════════════════
 
 async def process_message(phone: str, message: str) -> str:
-    """
-    Entry point for every incoming message.
-    Returns a string response to send back to the farmer.
-    All exceptions are caught here so the webhook never returns 500.
-    """
     try:
         return await _route(phone, message)
     except Exception as exc:
-        # Log but never expose internals to the farmer
         print(f"[KisanAI ERROR] phone={phone} msg={message!r} err={exc!r}")
         return (
             "\u26a0\ufe0f Kuch technical problem aa gayi. "
             "Thodi der mein dobara try karein. \U0001F64F"
         )
 
-
 async def _route(phone: str, message: str) -> str:
     farmer = get_farmer(phone)
     low = message.lower().strip()
 
-    # ── STEP 0: Brand new user ──────────────────────────────────────────
+    # ── STEP 0: Brand new user
     if farmer is None:
         create_farmer(phone)
         return (
@@ -123,7 +127,7 @@ async def _route(phone: str, message: str) -> str:
 
     step = farmer.get("onboarding_step", 0)
 
-    # ── STEP 0 → 1: Save name ───────────────────────────────────────────
+    # ── STEP 0 → 1: Save name
     if step == 0:
         name = message.strip()[:50] or "Kisan bhai"
         update_farmer(phone, name=name)
@@ -137,7 +141,7 @@ async def _route(phone: str, message: str) -> str:
             "1, 2, ya 3 reply karein."
         )
 
-    # ── STEP 1 → 2: Save language ───────────────────────────────────────
+    # ── STEP 1 → 2: Save language
     if step == 1:
         lang = LANGUAGES.get(low, "hi")
         lang_name = LANG_NAMES.get(lang, "Hindi")
@@ -145,7 +149,7 @@ async def _route(phone: str, message: str) -> str:
         advance_step(phone, 2)
         return f"  {lang_name} set! \u2705\n\nAap mainly kaun si fasal ugaate hain?"
 
-    # ── STEP 2 → 3: Save crop ───────────────────────────────────────────
+    # ── STEP 2 → 3: Save crop
     if step == 2:
         crop = message.strip()[:50] or "fasal"
         update_farmer(phone, crop=crop)
@@ -156,7 +160,7 @@ async def _route(phone: str, message: str) -> str:
             "Main aapke liye local mausam aur mandi bhav laaunga."
         )
 
-    # ── STEP 3 → 4: Save location, show weather + mandi ────────────────
+    # ── STEP 3 → 4: Save location + state, show weather + mandi
     if step == 3:
         district = message.strip()[:60] or ""
         if not district:
@@ -172,10 +176,14 @@ async def _route(phone: str, message: str) -> str:
                 "Jaise: 'Karnal', 'Nashik', 'Ludhiana', 'Jaipur'"
             )
 
-        # Persist location and mark onboarded
+        # Detect state from district
+        detected_state = DISTRICT_TO_STATE.get(district.lower().strip(), "")
+
+        # Persist location + state and mark onboarded
         update_farmer(
             phone,
             district=district,
+            state=detected_state,
             lat=lat,
             lon=lon,
             onboarding_step=4,
@@ -184,11 +192,10 @@ async def _route(phone: str, message: str) -> str:
 
         # Fetch weather and mandi (outside DB context — correct)
         weather = await fetch_weather(lat, lon, district)
-        mandi_records = await fetch_mandi(crop)
+        mandi_records = await fetch_mandi(crop, detected_state)
         mandi_text = format_mandi(mandi_records, limit=3)
 
-        return (
-            f"  {district} set! \u2705\n\n"
+        return (           f"  {district} set! \u2705\n\n"
             f"{weather}\n\n"
             f"  {crop} mandi prices:\n{mandi_text}\n\n"
             "Sab kuch tayar hai! Ab kuch bhi poochhen. \U0001F33E"
